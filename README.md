@@ -1,10 +1,13 @@
-# macro-stress-optimizer
+# macro-stress-forecaster
 
-This project extends [macro-stress-pipeline](https://github.com/JaredRudolph/macro-stress-pipeline) with a machine learning layer. The pipeline package (`macro_stress_pipeline`) is inherited unchanged from that project. This repo adds the ML package (`macro_stress_optimizer`), which learns per-indicator weights that maximize AUC between a weighted composite stress score and realized SPY drawdown labels.
+This is the third project in a four-part macro stress series. It extends [macro-stress-optimizer](https://github.com/JaredRudolph/macro-stress-optimizer) with a forward-looking forecaster. The pipeline and optimizer packages are inherited unchanged. This repo adds `macro_stress_forecaster`, which re-optimizes indicator weights against forward SPY drawdown labels and trains a classifier to output drawdown probability.
 
-The pipeline ingests market and FRED data, computes a composite stress score across 16 leading indicators, and writes the result to parquet. The ML layer reads that parquet and replaces the equal-weight average with data-driven weights via SLSQP optimization.
+The series:
 
-The stress score is a forward-looking risk indicator built from indicators with demonstrated leading properties. Reactive and coincident indicators (VIX, SKEW, CPI, USD/CNY, gold/equity ratio) were excluded. Optimized weights improve historical fit; they are not a trading signal.
+1. **macro-stress-pipeline**: ingests yfinance and FRED data, computes a composite stress score from 16 leading indicators, writes `stress_score.parquet`
+2. **macro-stress-optimizer**: reads `stress_score.parquet`, learns optimal per-indicator weights via SLSQP to maximize AUC against coincident SPY drawdown labels, writes `optimized_weights.json`
+3. **macro-stress-forecaster** (this repo): reads `stress_score.parquet`, re-runs weight optimization against forward labels (60-day horizon), trains a classifier to output drawdown probability, writes `forecast.parquet`
+4. **macro-stress-dashboard**: consumes all upstream outputs and visualizes stress score, optimized weights, and forecast probabilities
 
 ## Indicators
 
@@ -43,29 +46,37 @@ The stress score is a forward-looking risk indicator built from indicators with 
 ## Architecture
 
 ```
-Pipeline ──────────────────────────────────────────
+Pipeline
   fetch_data.py      pulls yfinance + FRED
   process_data.py    merges, resamples, computes ratios
   features.py        rolling percentile rank, direction flip, composite score
   pipeline.py        orchestration, writes stress_score.parquet
 
                      data/processed/stress_score.parquet
-                                      │
-                                      ▼
-ML ────────────────────────────────────────────────
-  labels.py          derives binary SPY drawdown labels from parquet
+                                      |
+                                      v
+Optimizer
+  labels.py          coincident SPY drawdown labels
   optimizer.py       SLSQP weight optimization, alpha sweep, CV evaluation
+
+                     data/processed/optimized_weights.json
+                                      |
+                                      v
+Forecaster
+  labels.py          forward SPY drawdown labels (lookahead=60 days)
+  forecaster.py      re-optimizes weights against forward labels, trains classifier,
+                     writes forecast.parquet and forecast_weights.json
 ```
 
-Both packages are installed from `src/` via `pyproject.toml`. The ML package does not import from the pipeline package; the parquet file is the only interface.
+All three packages are installed from `src/` via `pyproject.toml`. The forecaster imports `optimize_weights` from `macro_stress_optimizer`; neither imports from `macro_stress_pipeline`. The parquet file is the only interface between the pipeline and ML layers.
 
 ## Setup
 
 Requires [uv](https://docs.astral.sh/uv/).
 
 ```bash
-git clone https://github.com/your-username/macro-stress-optimizer.git
-cd macro-stress-optimizer
+git clone https://github.com/JaredRudolph/macro-stress-forecaster.git
+cd macro-stress-forecaster
 uv sync
 ```
 
@@ -81,7 +92,8 @@ Get a key at [fred.stlouisfed.org](https://fred.stlouisfed.org/docs/api/api_key.
 
 ```bash
 uv run stress-pipeline   # fetch data, compute stress score
-uv run stress-optimize   # read parquet, optimize weights
+uv run stress-optimize   # read parquet, optimize weights (coincident labels)
+uv run stress-forecast   # read parquet, optimize for forward labels, train classifier
 ```
 
 Outputs:
@@ -89,53 +101,23 @@ Outputs:
 - `data/raw/market_raw.csv`: raw yfinance closes
 - `data/raw/fred_raw.csv`: raw FRED series
 - `data/processed/stress_score.parquet`: stress score with all ranked indicators and SPY
-- `data/processed/optimized_weights.json`: per-indicator weights, AUC comparison, and run metadata
+- `data/processed/optimized_weights.json`: per-indicator weights optimized against coincident drawdown labels
+- `data/processed/forecast_weights.json`: per-indicator weights optimized against forward labels, plus CV metrics
+- `data/processed/forecast.parquet`: original parquet columns plus `FORWARD_LABEL`, `FORECAST_SCORE`, and `DRAWDOWN_PROB`
 
-## Results
+## Forecaster Design
 
-On 5,000+ trading days (2006-2026), SLSQP improves mean CV test AUC from **0.838** (equal weights) to **0.853** (optimized, alpha=3.0) on a 5-fold time series split. The improvement is intentionally modest — L2 regularization toward equal weights prevents overfitting to specific stress regimes on a single 20-year timeline with sparse drawdown events (~26% of trading days). The optimized weights are descriptive: they reflect which indicators historically led SPY drawdowns, not a forward-looking signal.
+**Forward labels**: a day is labeled 1 if SPY drops at least 10% at any point within the next 60 trading days. The last 60 rows are dropped (no complete forward window).
+
+**Weight re-optimization**: `optimize_weights(X, y_forward)` from the optimizer is called with forward labels before classifier training. The resulting weights (`FORECAST_SCORE`) are tuned for predictive rather than coincident fit and serve as an interpretable single-feature baseline.
+
+**Leakage prevention**: the classifier uses `TimeSeriesSplit(gap=60)`, which skips 60 samples between each train and test fold so no fold's training labels overlap with the test period's forward window.
+
+**Metrics**: AUC and Brier score. Baselines are the equal-weight stress score evaluated against forward labels.
 
 ## Notebooks
 
-`notebooks/stress_score_eda.ipynb` visualizes the pipeline output. Run the pipeline first, then open in Jupyter or VS Code.
-
-**Stress score vs SPY**
-
-![Stress score vs SPY](docs/stress_vs_spy.png)
-
-**Stress score vs SPY drawdown (normalized)**
-
-![Stress score vs SPY drawdown](docs/stress_vs_drawdown.png)
-
-**Indicator breakdown: most recent observation**
-
-![Indicator breakdown](docs/indicator_breakdown.png)
-
-**Individual indicator time series**
-
-![Individual indicators](docs/indicator_grid.png)
-
-`notebooks/weight_optimizer.ipynb` covers the full ML workflow: label construction, SLSQP optimization, alpha sweep via cross-validation, weight stability, ROC curves, and optimized score visualization.
-
-**Alpha sweep: test AUC and generalization gap vs regularization strength**
-
-![Alpha sweep](docs/alpha_sweep.png)
-
-**Optimized vs equal-weight indicator weights**
-
-![Weight stability](docs/weight_stability.png)
-
-**ROC curves: equal weight vs optimized**
-
-![ROC curves](docs/roc_curves.png)
-
-**Optimized vs equal-weight score overlaid on SPY**
-
-![Optimized vs equal weight vs SPY](docs/optimized_vs_equalweight_spy.png)
-
-**Optimized vs equal-weight score overlaid on SPY drawdown**
-
-![Optimized vs equal weight vs drawdown](docs/optimized_vs_equalweight_drawdown.png)
+`notebooks/forecaster.ipynb` covers the full forecaster workflow: forward label construction, weight re-optimization, classifier training and CV evaluation, and probability visualization.
 
 ## Development
 
