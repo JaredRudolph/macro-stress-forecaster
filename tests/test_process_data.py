@@ -15,7 +15,7 @@ def make_market_df(n=30):
             "HG=F": 4.0,
             "CL=F": 70.0,
             "EEM": 45.0,
-            "DX=F": 103.0,
+            "DX-Y.NYB": 103.0,
         },
         index=idx,
     )
@@ -76,7 +76,7 @@ def test_merge_all_contains_expected_columns():
         "HG=F",
         "CL=F",
         "EEM",
-        "DX=F",
+        "DX-Y.NYB",
         "XLK_XLV",
         "T10Y2Y",
         "T30Y10Y",
