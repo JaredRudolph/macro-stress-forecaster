@@ -11,10 +11,7 @@ def compute_forward_drawdown_labels(
     the next `lookahead` trading days. The last `lookahead` rows have no complete
     forward window and are dropped from the output."""
     future_min = (
-        spy[::-1]
-        .rolling(window=lookahead, min_periods=lookahead)
-        .min()[::-1]
-        .shift(-1)
+        spy[::-1].rolling(window=lookahead, min_periods=lookahead).min()[::-1].shift(-1)
     )
     future_drop = future_min / spy - 1
 
