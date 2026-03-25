@@ -1,4 +1,3 @@
-import os
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -24,7 +23,7 @@ INDICATOR_COLS = [
     "HG=F",
     "CL=F",
     "EEM",
-    "DX=F",
+    "DX-Y.NYB",
 ]
 
 DRAWDOWN_THRESHOLD = 0.08
@@ -64,7 +63,8 @@ def run(
     parquet_path: Path = PARQUET_PATH,
     output_path: Path = OUTPUT_PATH,
 ) -> pd.DataFrame:
-    """Load stress_score.parquet, train XGBoost on forward labels, write forecast.parquet."""
+    """Load stress_score.parquet, train XGBoost on forward labels, write
+    forecast.parquet."""
     logger.info(f"Loading {parquet_path}")
     df = pd.read_parquet(parquet_path)
     df.index = pd.to_datetime(df.index)
@@ -88,13 +88,9 @@ def run(
     params = {**MODEL_PARAMS, "scale_pos_weight": scale_pos_weight}
     model = XGBClassifier(**params)
     model.fit(X, y)
-    logger.info(
-        f"Model trained on {len(X)} rows ({n_pos} positive, {n_neg} negative)"
-    )
+    logger.info(f"Model trained on {len(X)} rows ({n_pos} positive, {n_neg} negative)")
 
-    proba = pd.Series(
-        model.predict_proba(X)[:, 1], index=X.index, name="DRAWDOWN_PROB"
-    )
+    proba = pd.Series(model.predict_proba(X)[:, 1], index=X.index, name="DRAWDOWN_PROB")
 
     out = df.copy()
     out["FORWARD_LABEL"] = labels
