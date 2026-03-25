@@ -24,7 +24,7 @@ MARKET_TICKERS = [
     "HG=F",  # Copper futures
     "CL=F",  # Crude oil futures (used as 21-day ROC)
     "EEM",  # Emerging markets ETF
-    "DX=F",  # DXY dollar index futures
+    "DX-Y.NYB",  # DXY dollar index
 ]
 
 FRED_SERIES = [
