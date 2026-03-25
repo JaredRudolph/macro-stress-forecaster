@@ -29,7 +29,7 @@ INDICATOR_COLS = [
     "HG=F",
     "CL=F",
     "EEM",
-    "DX=F",
+    "DX-Y.NYB",
 ]
 
 DRAWDOWN_THRESHOLD = 0.10
