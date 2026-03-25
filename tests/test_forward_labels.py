@@ -1,6 +1,5 @@
 import numpy as np
 import pandas as pd
-import pytest
 
 from macro_stress_forecaster.labels import compute_forward_drawdown_labels
 
@@ -52,8 +51,12 @@ def test_output_is_binary():
 def test_custom_threshold():
     # t=0: drop = -6%, labeled 1 at 5% threshold, 0 at 8%
     spy = make_spy([100, 94, 94, 100, 100, 100])
-    assert compute_forward_drawdown_labels(spy, threshold=0.05, lookahead=3).iloc[0] == 1
-    assert compute_forward_drawdown_labels(spy, threshold=0.08, lookahead=3).iloc[0] == 0
+    assert (
+        compute_forward_drawdown_labels(spy, threshold=0.05, lookahead=3).iloc[0] == 1
+    )
+    assert (
+        compute_forward_drawdown_labels(spy, threshold=0.08, lookahead=3).iloc[0] == 0
+    )
 
 
 def test_drawdown_only_within_window():
@@ -67,5 +70,6 @@ def test_event_at_edge_of_window_is_captured():
     # Drawdown occurs exactly at the last day of the window
     spy = make_spy([100, 100, 100, 80, 100, 100, 100])
     labels = compute_forward_drawdown_labels(spy, threshold=0.08, lookahead=3)
-    # t=0: future min over next 3 days = min(spy[1], spy[2], spy[3]) = min(100, 100, 80) = 80
+    # t=0: future min over next 3 days = min(spy[1], spy[2], spy[3]) =
+    # min(100, 100, 80) = 80
     assert labels.iloc[0] == 1
