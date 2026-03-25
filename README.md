@@ -41,7 +41,7 @@ The series:
 | `HG=F` | Copper futures (growth proxy) |
 | `CL=F` | Crude oil futures (rate-of-change; dual stress regime) |
 | `EEM` | Emerging markets ETF |
-| `DX=F` | DXY dollar index |
+| `DX-Y.NYB` | DXY dollar index |
 
 ## Architecture
 
