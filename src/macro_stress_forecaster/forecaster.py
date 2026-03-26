@@ -1,8 +1,14 @@
+import os
 from datetime import datetime, timezone
+from itertools import product
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
+from joblib import Parallel, delayed
 from loguru import logger
+from sklearn.metrics import brier_score_loss, roc_auc_score
+from sklearn.model_selection import TimeSeriesSplit
 from xgboost import XGBClassifier
 
 from macro_stress_forecaster.labels import compute_forward_drawdown_labels
@@ -29,11 +35,15 @@ INDICATOR_COLS = [
 DRAWDOWN_THRESHOLD = 0.08
 LOOKAHEAD = 60
 MOM_WINDOWS = [21, 63]
+N_SPLITS = 5
 
-MODEL_PARAMS = {
-    "n_estimators": 100,
-    "max_depth": 3,
-    "learning_rate": 0.01,
+PARAM_GRID = {
+    "n_estimators": [75, 100, 150, 200, 300],
+    "max_depth": [3],
+    "learning_rate": [0.005, 0.01, 0.02],
+}
+
+FIXED_PARAMS = {
     "subsample": 0.8,
     "colsample_bytree": 0.8,
     "random_state": 42,
@@ -59,11 +69,77 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     return pd.concat(frames, axis=1)
 
 
+def _run_cv(params: dict, X: pd.DataFrame, y: pd.Series) -> list[dict]:
+    tscv = TimeSeriesSplit(n_splits=N_SPLITS, gap=LOOKAHEAD)
+    folds = []
+    for fold, (train_idx, test_idx) in enumerate(tscv.split(X)):
+        X_train, X_test = X.iloc[train_idx], X.iloc[test_idx]
+        y_train, y_test = y.iloc[train_idx], y.iloc[test_idx]
+        if y_train.nunique() < 2 or y_test.nunique() < 2:
+            continue
+        model = XGBClassifier(**params)
+        model.fit(X_train, y_train)
+        train_proba = model.predict_proba(X_train)[:, 1]
+        test_proba = model.predict_proba(X_test)[:, 1]
+        folds.append(
+            {
+                "fold": fold + 1,
+                "test_start": X.index[test_idx[0]].date(),
+                "test_end": X.index[test_idx[-1]].date(),
+                "train_auc": roc_auc_score(y_train, train_proba),
+                "auc": roc_auc_score(y_test, test_proba),
+                "brier": brier_score_loss(y_test, test_proba),
+            }
+        )
+    return folds
+
+
+def _sweep_job(combo: dict, X: pd.DataFrame, y: pd.Series, scale_pos_weight: float) -> dict:
+    params = {**combo, **FIXED_PARAMS, "scale_pos_weight": scale_pos_weight}
+    folds = _run_cv(params, X, y)
+    aucs = [f["auc"] for f in folds]
+    return {
+        **combo,
+        "mean_train_auc": np.mean([f["train_auc"] for f in folds]),
+        "mean_auc": np.mean(aucs),
+        "std_auc": np.std(aucs),
+        "mean_brier": np.mean([f["brier"] for f in folds]),
+    }
+
+
+def tune_hyperparams(X: pd.DataFrame, y: pd.Series, scale_pos_weight: float) -> dict:
+    """Parallel sweep over PARAM_GRID; returns best params by mean_auc - std_auc."""
+    combos = [
+        {"n_estimators": n, "max_depth": d, "learning_rate": lr}
+        for n, d, lr in product(
+            PARAM_GRID["n_estimators"],
+            PARAM_GRID["max_depth"],
+            PARAM_GRID["learning_rate"],
+        )
+    ]
+    logger.info(f"Sweeping {len(combos)} param combinations on {os.cpu_count()} cores")
+    results = Parallel(n_jobs=os.cpu_count())(
+        delayed(_sweep_job)(c, X, y, scale_pos_weight) for c in combos
+    )
+    best = max(results, key=lambda r: r["mean_auc"] - r["std_auc"])
+    logger.info(
+        f"Best params: n_estimators={best['n_estimators']}  max_depth={best['max_depth']}"
+        f"  learning_rate={best['learning_rate']}"
+        f"  AUC={best['mean_auc']:.4f} +/- {best['std_auc']:.4f}"
+        f"  Brier={best['mean_brier']:.4f}"
+    )
+    return {
+        "n_estimators": best["n_estimators"],
+        "max_depth": best["max_depth"],
+        "learning_rate": best["learning_rate"],
+    }
+
+
 def run(
     parquet_path: Path = PARQUET_PATH,
     output_path: Path = OUTPUT_PATH,
 ) -> pd.DataFrame:
-    """Load stress_score.parquet, train XGBoost on forward labels, write
+    """Load stress_score.parquet, tune XGBoost via CV, train on full dataset, write
     forecast.parquet."""
     logger.info(f"Loading {parquet_path}")
     df = pd.read_parquet(parquet_path)
@@ -85,8 +161,40 @@ def run(
     n_neg = len(y) - n_pos
     scale_pos_weight = n_neg / n_pos
 
-    params = {**MODEL_PARAMS, "scale_pos_weight": scale_pos_weight}
-    model = XGBClassifier(**params)
+    # Baseline: equal-weight stress score evaluated against forward labels via CV.
+    equal_score = df[INDICATOR_COLS].loc[X.index].mean(axis=1)
+    tscv = TimeSeriesSplit(n_splits=N_SPLITS, gap=LOOKAHEAD)
+    baseline_aucs, baseline_briers = [], []
+    for _, test_idx in tscv.split(X):
+        y_test = y.iloc[test_idx]
+        eq_test = equal_score.iloc[test_idx]
+        if y_test.nunique() < 2:
+            continue
+        baseline_aucs.append(roc_auc_score(y_test, eq_test))
+        baseline_briers.append(brier_score_loss(y_test, eq_test))
+    logger.info(
+        f"Baseline (equal weight)  AUC={np.mean(baseline_aucs):.4f}"
+        f"  Brier={np.mean(baseline_briers):.4f}"
+    )
+
+    best_combo = tune_hyperparams(X, y, scale_pos_weight)
+    best_params = {**best_combo, **FIXED_PARAMS, "scale_pos_weight": scale_pos_weight}
+
+    # Final CV with best params for honest metrics.
+    best_folds = _run_cv(best_params, X, y)
+    for f in best_folds:
+        logger.info(
+            f"  fold {f['fold']} ({f['test_start']} to {f['test_end']})"
+            f"  AUC={f['auc']:.4f}  Brier={f['brier']:.4f}"
+        )
+    cv_auc = np.mean([f["auc"] for f in best_folds])
+    cv_brier = np.mean([f["brier"] for f in best_folds])
+    logger.info(
+        f"XGBoost (tuned)          AUC={cv_auc:.4f}  Brier={cv_brier:.4f}"
+        f"  (vs baseline AUC={np.mean(baseline_aucs):.4f})"
+    )
+
+    model = XGBClassifier(**best_params)
     model.fit(X, y)
     logger.info(f"Model trained on {len(X)} rows ({n_pos} positive, {n_neg} negative)")
 
@@ -101,6 +209,10 @@ def run(
         "n_rows": len(X),
         "drawdown_threshold": DRAWDOWN_THRESHOLD,
         "lookahead": LOOKAHEAD,
+        "cv_auc": round(cv_auc, 4),
+        "cv_brier": round(cv_brier, 4),
+        "baseline_auc": round(float(np.mean(baseline_aucs)), 4),
+        "best_params": best_combo,
         "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
     }
 
