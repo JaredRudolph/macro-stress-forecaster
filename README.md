@@ -69,6 +69,8 @@ The dominance of momentum features over raw rank features throughout the chart v
 
 Each indicator is percentile-ranked over a 756-day rolling window and direction-flipped so that 1.0 always means maximum stress. The first 755 rows of each ranked column are NaN (warmup period).
 
+![Individual indicator percentile ranks](docs/indicator_grid.png)
+
 ## Architecture
 
 ```
@@ -133,6 +135,18 @@ Outputs:
 - `data/processed/forecast.parquet`: original parquet columns plus `FORWARD_LABEL` and `DRAWDOWN_PROB`
 
 `forecast.parquet` metadata includes `cv_auc`, `cv_brier`, `baseline_auc`, and `best_params` from the tuning run.
+
+## Input data
+
+The forecaster reads `stress_score.parquet` produced by the pipeline. It contains the raw SPY price, the equal-weight composite stress score, and the 16 percentile-ranked indicator columns that serve directly as features.
+
+![Macro stress score vs SPY](docs/stress_vs_spy.png)
+
+The composite score is the equal-weight mean of the 16 ranked indicators. It elevates ahead of sustained SPY drawdowns and retreats during bull markets.
+
+![Stress score vs SPY drawdown](docs/stress_vs_drawdown.png)
+
+Overlaying the stress score against the normalized SPY drawdown shows the score tends to lead the drawdown, not just confirm it. This leading property is what the forecaster is designed to exploit: the 16 indicators are selected because they reflect deteriorating macro conditions before they show up in equity prices.
 
 ## Forecaster Design
 
