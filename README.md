@@ -1,13 +1,12 @@
 # macro-stress-forecaster
 
-This is the third project in a four-part macro stress series. It extends [macro-stress-optimizer](https://github.com/JaredRudolph/macro-stress-optimizer) with a forward-looking forecaster. The pipeline and optimizer packages are inherited unchanged. This repo adds `macro_stress_forecaster`, which trains an XGBoost classifier on forward SPY drawdown labels to output drawdown probability.
+This is the third project in a macro stress series. It extends [macro-stress-optimizer](https://github.com/JaredRudolph/macro-stress-optimizer) with a forward-looking forecaster. The pipeline and optimizer packages are inherited unchanged. This repo adds `macro_stress_forecaster`, which trains an XGBoost classifier on forward SPY drawdown labels to output drawdown probability.
 
 The series:
 
 1. **macro-stress-pipeline**: ingests yfinance and FRED data, computes a composite stress score from 16 leading indicators, writes `stress_score.parquet`
 2. **macro-stress-optimizer**: reads `stress_score.parquet`, learns optimal per-indicator weights via SLSQP to maximize AUC against coincident SPY drawdown labels, writes `optimized_weights.json`
 3. **macro-stress-forecaster** (this repo): reads `stress_score.parquet`, trains an XGBoost classifier against forward SPY drawdown labels (60-day horizon, 8% threshold) to output drawdown probability, writes `forecast.parquet`
-4. **macro-stress-dashboard**: consumes all upstream outputs and visualizes stress score, optimized weights, and forecast probabilities
 
 ## Results
 
@@ -16,6 +15,10 @@ The forecaster outputs a per-day probability that SPY will drop at least 8% at s
 ![Drawdown probability vs SPY](docs/drawdown_prob_vs_spy.png)
 
 The probability signal elevated ahead of every major stress period in the sample: the GFC, the 2011 EU debt crisis, the 2015-2016 China slowdown, the 2018 Q4 selloff, COVID, the 2022 rate hike cycle, and the 2025 tariff shock. The signal drops during sustained bull markets and re-elevates as macro conditions deteriorate.
+
+![Drawdown probability vs SPY drawdown normalized](docs/drawdown_prob_vs_spy_drawdown.png)
+
+Overlaying the probability against the normalized SPY drawdown (both on a 0-1 scale) shows how well the signal tracks realized drawdown severity. The probability tends to rise before the drawdown deepens and fall before it recovers.
 
 ### Model performance
 
