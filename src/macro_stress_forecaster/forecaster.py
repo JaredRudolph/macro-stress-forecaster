@@ -39,13 +39,16 @@ N_SPLITS = 5
 
 PARAM_GRID = {
     "n_estimators": [75, 100, 150, 200, 300],
-    "max_depth": [3],
+    "max_depth": [2],
     "learning_rate": [0.005, 0.01, 0.02],
+    "reg_alpha": [0.1, 1.0, 5.0],
+    "reg_lambda": [1.0, 5.0],
+    "half_life": [126, 252, 504, None],
 }
 
 FIXED_PARAMS = {
-    "subsample": 0.8,
-    "colsample_bytree": 0.8,
+    "subsample": 0.6,
+    "colsample_bytree": 0.4,
     "random_state": 42,
     "tree_method": "hist",
     "eval_metric": "logloss",
@@ -54,6 +57,13 @@ FIXED_PARAMS = {
 
 PARQUET_PATH = Path("data/processed/stress_score.parquet")
 OUTPUT_PATH = Path("data/processed/forecast.parquet")
+
+
+def compute_sample_weights(index: pd.DatetimeIndex, half_life: int) -> np.ndarray:
+    """Exponential decay weights relative to the last date in index.
+    Most recent sample = 1.0, weight halves every half_life calendar days."""
+    days_back = (index[-1] - index).days
+    return np.exp(-np.log(2) / half_life * days_back)
 
 
 def build_features(df: pd.DataFrame) -> pd.DataFrame:
@@ -69,7 +79,9 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     return pd.concat(frames, axis=1)
 
 
-def _run_cv(params: dict, X: pd.DataFrame, y: pd.Series) -> list[dict]:
+def _run_cv(
+    params: dict, X: pd.DataFrame, y: pd.Series, half_life: int | None = None
+) -> list[dict]:
     tscv = TimeSeriesSplit(n_splits=N_SPLITS, gap=LOOKAHEAD)
     folds = []
     for fold, (train_idx, test_idx) in enumerate(tscv.split(X)):
@@ -77,8 +89,9 @@ def _run_cv(params: dict, X: pd.DataFrame, y: pd.Series) -> list[dict]:
         y_train, y_test = y.iloc[train_idx], y.iloc[test_idx]
         if y_train.nunique() < 2 or y_test.nunique() < 2:
             continue
+        sw = compute_sample_weights(X_train.index, half_life) if half_life else None
         model = XGBClassifier(**params)
-        model.fit(X_train, y_train)
+        model.fit(X_train, y_train, sample_weight=sw)
         train_proba = model.predict_proba(X_train)[:, 1]
         test_proba = model.predict_proba(X_test)[:, 1]
         folds.append(
@@ -95,8 +108,10 @@ def _run_cv(params: dict, X: pd.DataFrame, y: pd.Series) -> list[dict]:
 
 
 def _sweep_job(combo: dict, X: pd.DataFrame, y: pd.Series, scale_pos_weight: float) -> dict:
-    params = {**combo, **FIXED_PARAMS, "scale_pos_weight": scale_pos_weight}
-    folds = _run_cv(params, X, y)
+    half_life = combo.get("half_life")
+    xgb_combo = {k: v for k, v in combo.items() if k != "half_life"}
+    params = {**xgb_combo, **FIXED_PARAMS, "scale_pos_weight": scale_pos_weight}
+    folds = _run_cv(params, X, y, half_life=half_life)
     aucs = [f["auc"] for f in folds]
     return {
         **combo,
@@ -110,11 +125,21 @@ def _sweep_job(combo: dict, X: pd.DataFrame, y: pd.Series, scale_pos_weight: flo
 def tune_hyperparams(X: pd.DataFrame, y: pd.Series, scale_pos_weight: float) -> dict:
     """Parallel sweep over PARAM_GRID; returns best params by mean_auc - std_auc."""
     combos = [
-        {"n_estimators": n, "max_depth": d, "learning_rate": lr}
-        for n, d, lr in product(
+        {
+            "n_estimators": n,
+            "max_depth": d,
+            "learning_rate": lr,
+            "reg_alpha": a,
+            "reg_lambda": l,
+            "half_life": hl,
+        }
+        for n, d, lr, a, l, hl in product(
             PARAM_GRID["n_estimators"],
             PARAM_GRID["max_depth"],
             PARAM_GRID["learning_rate"],
+            PARAM_GRID["reg_alpha"],
+            PARAM_GRID["reg_lambda"],
+            PARAM_GRID["half_life"],
         )
     ]
     logger.info(f"Sweeping {len(combos)} param combinations on {os.cpu_count()} cores")
@@ -124,7 +149,8 @@ def tune_hyperparams(X: pd.DataFrame, y: pd.Series, scale_pos_weight: float) -> 
     best = max(results, key=lambda r: r["mean_auc"] - r["std_auc"])
     logger.info(
         f"Best params: n_estimators={best['n_estimators']}  max_depth={best['max_depth']}"
-        f"  learning_rate={best['learning_rate']}"
+        f"  learning_rate={best['learning_rate']}  reg_alpha={best['reg_alpha']}"
+        f"  reg_lambda={best['reg_lambda']}  half_life={best['half_life']}"
         f"  AUC={best['mean_auc']:.4f} +/- {best['std_auc']:.4f}"
         f"  Brier={best['mean_brier']:.4f}"
     )
@@ -132,6 +158,9 @@ def tune_hyperparams(X: pd.DataFrame, y: pd.Series, scale_pos_weight: float) -> 
         "n_estimators": best["n_estimators"],
         "max_depth": best["max_depth"],
         "learning_rate": best["learning_rate"],
+        "reg_alpha": best["reg_alpha"],
+        "reg_lambda": best["reg_lambda"],
+        "half_life": best["half_life"],
     }
 
 
@@ -178,10 +207,12 @@ def run(
     )
 
     best_combo = tune_hyperparams(X, y, scale_pos_weight)
-    best_params = {**best_combo, **FIXED_PARAMS, "scale_pos_weight": scale_pos_weight}
+    half_life = best_combo["half_life"]
+    xgb_combo = {k: v for k, v in best_combo.items() if k != "half_life"}
+    best_params = {**xgb_combo, **FIXED_PARAMS, "scale_pos_weight": scale_pos_weight}
 
     # Final CV with best params for honest metrics.
-    best_folds = _run_cv(best_params, X, y)
+    best_folds = _run_cv(best_params, X, y, half_life=half_life)
     for f in best_folds:
         logger.info(
             f"  fold {f['fold']} ({f['test_start']} to {f['test_end']})"
@@ -194,8 +225,9 @@ def run(
         f"  (vs baseline AUC={np.mean(baseline_aucs):.4f})"
     )
 
+    sw = compute_sample_weights(X.index, half_life) if half_life else None
     model = XGBClassifier(**best_params)
-    model.fit(X, y)
+    model.fit(X, y, sample_weight=sw)
     logger.info(f"Model trained on {len(X)} rows ({n_pos} positive, {n_neg} negative)")
 
     proba = pd.Series(model.predict_proba(X)[:, 1], index=X.index, name="DRAWDOWN_PROB")
@@ -212,7 +244,8 @@ def run(
         "cv_auc": round(cv_auc, 4),
         "cv_brier": round(cv_brier, 4),
         "baseline_auc": round(float(np.mean(baseline_aucs)), 4),
-        "best_params": best_combo,
+        "half_life": half_life,
+        "best_params": xgb_combo,
         "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
     }
 
