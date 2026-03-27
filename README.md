@@ -26,7 +26,7 @@ Overlaying the probability against the normalized SPY drawdown (both on a 0-1 sc
 
 The ROC chart is computed on the full training dataset (in-sample), so the XGBoost AUC reflects a model evaluated on data it was trained on. It is shown here to illustrate separation from the equal-weight baseline, not as an honest generalization estimate. Cross-validated AUC (5-fold `TimeSeriesSplit` with a 60-day gap) is the metric used for model selection and is logged at runtime.
 
-The equal-weight baseline at AUC 0.581 reflects the ceiling of the linear composite approach against forward labels. The relationship between the 16 indicators and 60-day-ahead drawdowns is nonlinear and interaction-dependent; the linear model fails to capture it.
+CV results show that recency weighting is the key lever. Without it, XGBoost (CV AUC 0.610) underperforms the equal-weight baseline (0.650) — the model memorizes historical stress regimes that do not transfer to recent periods. With a 504-day half-life, XGBoost reaches CV AUC 0.658, modestly but consistently above the baseline across the stable folds. The most recent fold (2022-2026) remains the hardest: the post-rate-hike and tariff-shock regime differs structurally from the GFC and COVID patterns that dominate the training data.
 
 ### Feature importance
 
@@ -179,13 +179,25 @@ With roughly 938 positive events in the training set, adding feature families be
 
 ### Model
 
-XGBoost (`XGBClassifier`) trained directly on the 48 momentum features. A linear weighted composite was explored first and abandoned: test AUC sat near 0.5 on forward labels, below the equal-weight baseline. XGBoost captures the nonlinear relationships and indicator interactions that the linear model misses.
+XGBoost (`XGBClassifier`) trained on the 48 momentum features with exponential recency weighting. A linear weighted composite was explored first and abandoned: test AUC sat near 0.5 on forward labels, below the equal-weight baseline.
 
 `scale_pos_weight = n_neg / n_pos` corrects for class imbalance (~19% drawdown events).
 
+### Recency weighting
+
+Per-fold CV analysis revealed that XGBoost without recency weighting (CV AUC 0.610) underperforms the equal-weight baseline (0.650). The gap is not uniform across folds — fold 5 (2022-2026) drives most of it, with test AUC near random chance. The model memorizes GFC and COVID stress patterns and misapplies them to a structurally different regime (post-rate-hike recovery, AI bull market, tariff shock).
+
+Exponential decay sample weights assign each training sample a weight relative to the end of its training fold:
+
+```
+w(t) = exp(-ln(2) / half_life * days_back)
+```
+
+Most recent sample = 1.0, weight halves every `half_life` calendar days. Weights are computed per fold so each fold's training set is weighted relative to its own end date. A half-life of 504 days (2 years) was selected via CV sweep — it improves mean CV AUC to 0.658, recovering fold 4 (+0.156) and fold 5 (+0.043) without significantly hurting the stable middle folds. Without recency weighting, XGBoost does not justify its complexity over the equal-weight baseline.
+
 ### Hyperparameter tuning
 
-Parallel sweep over `n_estimators` (75, 100, 150, 200, 300), `learning_rate` (0.005, 0.01, 0.02), and `max_depth` (3) using `joblib.Parallel`. Each combination is evaluated via 5-fold time series CV. Selection criterion: `mean_auc - std_auc`, which penalizes variance across folds rather than optimizing for peak AUC. `max_depth` is fixed at 3 to limit overfitting given the sample size.
+Parallel sweep over `n_estimators` (75, 100, 150, 200, 300), `learning_rate` (0.005, 0.01, 0.02), `max_depth` (3), and `half_life` (126, 252, 504, None) using `joblib.Parallel`. Each combination is evaluated via 5-fold time series CV. Selection criterion: `mean_auc - std_auc`, which penalizes variance across folds rather than optimizing for peak AUC. `max_depth` is fixed at 3 to limit overfitting given the sample size.
 
 ### Leakage prevention
 
@@ -198,7 +210,7 @@ AUC and Brier score, evaluated via CV. Baseline is the equal-weight stress score
 ## Notebooks
 
 - `notebooks/feature_engineering.ipynb`: systematic sweep over feature families (lags, momentum, breadth, volatility, SPY drawdown) and label configurations (lookahead 20-120d, threshold 5-20%). Concludes that raw ranks + 21d/63d momentum and 60d/8% labels are the best setup at this sample size.
-- `notebooks/forecaster_xgb.ipynb`: full forecaster workflow using the feature engineering findings: momentum feature construction, hyperparameter sweep, CV evaluation, feature importance, and probability visualization.
+- `notebooks/forecaster_xgb.ipynb`: full forecaster workflow: momentum feature construction, hyperparameter sweep, per-fold CV diagnosis, recency weighting sweep (hl=504 selected), regularization sweep combined with recency weighting, feature importance, and probability visualization.
 - `notebooks/forecaster.ipynb`: initial attempt using logistic regression and weight re-optimization. Abandoned after test AUC failed to clear the equal-weight baseline.
 
 ## Development
