@@ -107,7 +107,9 @@ def _run_cv(
     return folds
 
 
-def _sweep_job(combo: dict, X: pd.DataFrame, y: pd.Series, scale_pos_weight: float) -> dict:
+def _sweep_job(
+    combo: dict, X: pd.DataFrame, y: pd.Series, scale_pos_weight: float
+) -> dict:
     half_life = combo.get("half_life")
     xgb_combo = {k: v for k, v in combo.items() if k != "half_life"}
     params = {**xgb_combo, **FIXED_PARAMS, "scale_pos_weight": scale_pos_weight}
