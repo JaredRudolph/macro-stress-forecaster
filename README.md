@@ -197,7 +197,7 @@ Most recent sample = 1.0, weight halves every `half_life` calendar days. Weights
 
 ### Hyperparameter tuning
 
-Parallel sweep over `n_estimators` (75, 100, 150, 200, 300), `learning_rate` (0.005, 0.01, 0.02), `max_depth` (3), and `half_life` (126, 252, 504, None) using `joblib.Parallel`. Each combination is evaluated via 5-fold time series CV. Selection criterion: `mean_auc - std_auc`, which penalizes variance across folds rather than optimizing for peak AUC. `max_depth` is fixed at 3 to limit overfitting given the sample size.
+Parallel sweep over `n_estimators` (75, 100, 150, 200, 300), `learning_rate` (0.005, 0.01, 0.02), `reg_alpha` (0.1, 1.0, 5.0), `reg_lambda` (1.0, 5.0), and `half_life` (126, 252, 504, None) using `joblib.Parallel` (360 combinations total). Each combination is evaluated via 5-fold time series CV. Selection criterion: `mean_auc - std_auc`, which penalizes variance across folds rather than optimizing for peak AUC. `max_depth` is fixed at 2 to limit overfitting given the sample size.
 
 ### Leakage prevention
 
