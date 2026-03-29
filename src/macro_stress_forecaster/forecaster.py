@@ -132,10 +132,10 @@ def tune_hyperparams(X: pd.DataFrame, y: pd.Series, scale_pos_weight: float) -> 
             "max_depth": d,
             "learning_rate": lr,
             "reg_alpha": a,
-            "reg_lambda": l,
+            "reg_lambda": rl,
             "half_life": hl,
         }
-        for n, d, lr, a, l, hl in product(
+        for n, d, lr, a, rl, hl in product(
             PARAM_GRID["n_estimators"],
             PARAM_GRID["max_depth"],
             PARAM_GRID["learning_rate"],
@@ -150,7 +150,8 @@ def tune_hyperparams(X: pd.DataFrame, y: pd.Series, scale_pos_weight: float) -> 
     )
     best = max(results, key=lambda r: r["mean_auc"] - r["std_auc"])
     logger.info(
-        f"Best params: n_estimators={best['n_estimators']}  max_depth={best['max_depth']}"
+        f"Best params: n_estimators={best['n_estimators']}"
+        f"  max_depth={best['max_depth']}"
         f"  learning_rate={best['learning_rate']}  reg_alpha={best['reg_alpha']}"
         f"  reg_lambda={best['reg_lambda']}  half_life={best['half_life']}"
         f"  AUC={best['mean_auc']:.4f} +/- {best['std_auc']:.4f}"
