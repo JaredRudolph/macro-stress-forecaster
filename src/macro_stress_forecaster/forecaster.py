@@ -233,7 +233,10 @@ def run(
     model.fit(X, y, sample_weight=sw)
     logger.info(f"Model trained on {len(X)} rows ({n_pos} positive, {n_neg} negative)")
 
-    proba = pd.Series(model.predict_proba(X)[:, 1], index=X.index, name="DRAWDOWN_PROB")
+    # Predict on all rows with valid features, including the last LOOKAHEAD rows
+    # that have no forward label. Those are the most actionable predictions.
+    X_all = features.dropna()
+    proba = pd.Series(model.predict_proba(X_all)[:, 1], index=X_all.index, name="DRAWDOWN_PROB")
 
     out = df.copy()
     out["FORWARD_LABEL"] = labels
