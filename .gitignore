@@ -16,6 +16,9 @@ dist/
 data/raw/
 data/processed/
 
+# Notebook files
+notebooks/read_data.ipynb
+
 # Environment variables
 .env
 
