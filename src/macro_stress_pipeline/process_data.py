@@ -28,6 +28,7 @@ def merge_all(df_market: pd.DataFrame, df_fred: pd.DataFrame) -> pd.DataFrame:
     combined = combined.join(ratios, how="left", rsuffix="_ratio")
     combined = combined.ffill()
     combined["T30Y10Y"] = combined["DGS30"] - combined["DGS10"]
+    combined["BAA_SPREAD"] = combined["DBAA"] - combined["DGS10"]
     combined["CL=F"] = combined["CL=F"].pct_change(CL_ROC_WINDOW)
     return combined
 
