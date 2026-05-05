@@ -36,7 +36,7 @@ def make_fred_df(n=800):
         "UMCSENT",
         "PERMIT",
         "NEWORDER",
-        "BAMLH0A0HYM2",
+        "DBAA",
     ]
     return pd.DataFrame({s: rng.random(n) for s in series}, index=idx)
 
