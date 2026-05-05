@@ -28,6 +28,7 @@ def make_fred_df():
             "T10Y2Y": [0.5, 0.4, 0.3, 0.2, 0.1, 0.0],
             "DGS30": [2.5, 2.4, 2.3, 2.2, 2.1, 2.0],
             "DGS10": [2.0, 1.9, 1.8, 1.7, 1.6, 1.5],
+            "DBAA": [5.5, 5.4, 5.3, 5.2, 5.1, 5.0],
         },
         index=idx,
     )
@@ -80,6 +81,7 @@ def test_merge_all_contains_expected_columns():
         "XLK_XLV",
         "T10Y2Y",
         "T30Y10Y",
+        "BAA_SPREAD",
     ]:
         assert col in result.columns, f"Missing column: {col}"
 
@@ -92,6 +94,7 @@ def test_merge_all_no_nans_after_first_fred_observation():
             "T10Y2Y": [0.5, 0.4, 0.3, 0.2, 0.1, 0.0],
             "DGS30": [2.5, 2.4, 2.3, 2.2, 2.1, 2.0],
             "DGS10": [2.0, 1.9, 1.8, 1.7, 1.6, 1.5],
+            "DBAA": [5.5, 5.4, 5.3, 5.2, 5.1, 5.0],
         },
         index=idx,
     )
