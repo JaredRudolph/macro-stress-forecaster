@@ -23,7 +23,7 @@ INDICATOR_COLS = [
     "NEWORDER",
     "ICSA",
     "DRCCLACBS",
-    "BAMLH0A0HYM2",
+    "BAA_SPREAD",
     "XLK_XLV",
     "TLT",
     "HG=F",
