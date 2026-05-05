@@ -1,5 +1,7 @@
 # macro-stress-forecaster
 
+**Part 3 of 3:** [macro-stress-pipeline](https://github.com/JaredRudolph/macro-stress-pipeline) | [macro-stress-optimizer](https://github.com/JaredRudolph/macro-stress-optimizer) | macro-stress-forecaster
+
 Third project in a four-part macro stress series. Reads `stress_score.parquet` from
 [macro-stress-pipeline](https://github.com/JaredRudolph/macro-stress-pipeline), trains an
 XGBoost classifier on forward SPY drawdown labels, and writes `forecast.parquet` with a
