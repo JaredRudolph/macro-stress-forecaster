@@ -236,7 +236,9 @@ def run(
     # Predict on all rows with valid features, including the last LOOKAHEAD rows
     # that have no forward label. Those are the most actionable predictions.
     X_all = features.dropna()
-    proba = pd.Series(model.predict_proba(X_all)[:, 1], index=X_all.index, name="DRAWDOWN_PROB")
+    proba = pd.Series(
+        model.predict_proba(X_all)[:, 1], index=X_all.index, name="DRAWDOWN_PROB"
+    )
 
     out = df.copy()
     out["FORWARD_LABEL"] = labels
