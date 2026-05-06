@@ -77,6 +77,7 @@ def test_run_preserves_input_columns(synthetic_parquet, tmp_path):
 
 def test_run_drawdown_prob_covers_recent_rows(synthetic_parquet, tmp_path):
     from macro_stress_forecaster.forecaster import LOOKAHEAD
+
     output_path = tmp_path / "forecast.parquet"
     run(parquet_path=synthetic_parquet, output_path=output_path)
     out = pd.read_parquet(output_path)
