@@ -7,10 +7,6 @@ Third project in a three-part macro stress series. Reads `stress_score.parquet` 
 XGBoost classifier on forward SPY drawdown labels, and writes `forecast.parquet` with a
 per-day drawdown probability.
 
-The series: [macro-stress-pipeline](https://github.com/JaredRudolph/macro-stress-pipeline)
-&rarr; [macro-stress-optimizer](https://github.com/JaredRudolph/macro-stress-optimizer)
-&rarr; **macro-stress-forecaster** (this repo)
-
 ## Results
 
 The forecaster outputs a per-day probability that SPY will drop at least 8% at some point
@@ -40,7 +36,7 @@ Cross-validated AUC (5-fold `TimeSeriesSplit` with a 60-day gap) is the metric u
 model selection and is logged at runtime.
 
 CV results show that recency weighting is the key lever. Without it, XGBoost (CV AUC 0.610)
-underperforms the equal-weight baseline (0.650) — the model memorizes historical stress
+underperforms the equal-weight baseline (0.650). The model memorizes historical stress
 regimes that do not transfer to recent periods. With a 504-day half-life, XGBoost reaches
 CV AUC 0.658, modestly but consistently above the baseline across the stable folds. The most
 recent fold (2022-2026) remains the hardest: the post-rate-hike and tariff-shock regime
@@ -123,8 +119,7 @@ weighting. A linear weighted composite was explored first and abandoned: test AU
 ### Recency weighting
 
 Per-fold CV analysis revealed that XGBoost without recency weighting (CV AUC 0.610)
-underperforms the equal-weight baseline (0.650). The gap is not uniform across folds —
-fold 5 (2022-2026) drives most of it, with test AUC near random chance. The model memorizes
+underperforms the equal-weight baseline (0.650). The gap is not uniform across folds, and fold 5 (2022-2026) drives most of it, with test AUC near random chance. The model memorizes
 GFC and COVID stress patterns and misapplies them to a structurally different regime
 (post-rate-hike recovery, AI bull market, tariff shock).
 
@@ -137,7 +132,7 @@ w(t) = exp(-ln(2) / half_life * days_back)
 
 Most recent sample = 1.0, weight halves every `half_life` calendar days. Weights are computed
 per fold so each fold's training set is weighted relative to its own end date. A half-life of
-504 days (2 years) was selected via CV sweep — it improves mean CV AUC to 0.658, recovering
+504 days (2 years) was selected via CV sweep, improving mean CV AUC to 0.658, recovering
 fold 4 (+0.156) and fold 5 (+0.043) without significantly hurting the stable middle folds.
 Without recency weighting, XGBoost does not justify its complexity over the equal-weight
 baseline.
